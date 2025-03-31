@@ -1,0 +1,15 @@
+# Ignore virtual environment
+.venvn/
+
+# Ignore dataset folders
+asvpoof-2019-dataset/
+datasetNEW/
+SceneFake/
+
+# Ignore common Python cache and dependencies
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
