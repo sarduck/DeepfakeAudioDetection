@@ -1,6 +1,10 @@
 # Ignore virtual environment
 .venvn/
 
+#Ignore checkpoints
+training_checkpoints_discriminator/
+training_figures/
+
 # Ignore dataset folders
 asvpoof-2019-dataset/
 datasetNEW/
