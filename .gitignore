@@ -4,6 +4,9 @@
 #Ignore checkpoints
 training_checkpoints_discriminator/
 training_figures/
+training_figures_1/
+training_checkpoints/
+training_figures_wgan_sa/
 
 # Ignore dataset folders
 asvpoof-2019-dataset/
@@ -17,3 +20,10 @@ __pycache__/
 *.pyd
 env/
 venv/
+
+audio_errors*.log
+discriminator_epoch*.log
+generator_epoch*.log
+mel_spectrograms.png
+noise_reduced_audio.wav
+original_audio.wav
