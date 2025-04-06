@@ -27,5 +27,7 @@ generator_epoch*.log
 mel_spectrograms.png
 noise_reduced_audio.wav
 original_audio.wav
-critic_wgan_sa_epoch*.keras
+critic_wgan_sa_epoch*.h5
 generator_wgan_sa_epoch*.keras
+generator_wgan_sa_epoch*.h5
+spoof_detector*.keras
