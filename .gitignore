@@ -12,6 +12,7 @@ training_figures_wgan_sa/
 asvpoof-2019-dataset/
 datasetNEW/
 SceneFake/
+generator_comparison/
 
 # Ignore common Python cache and dependencies
 __pycache__/
