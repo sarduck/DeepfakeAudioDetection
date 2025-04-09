@@ -13,6 +13,7 @@ asvpoof-2019-dataset/
 datasetNEW/
 SceneFake/
 generator_comparison/
+img/
 
 # Ignore common Python cache and dependencies
 __pycache__/
@@ -21,6 +22,9 @@ __pycache__/
 *.pyd
 env/
 venv/
+
+sp3.ipynb
+spoof_detector*.h5
 
 audio_errors*.log
 discriminator_epoch*.log
