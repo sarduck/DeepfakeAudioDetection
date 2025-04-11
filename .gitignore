@@ -23,9 +23,10 @@ __pycache__/
 env/
 venv/
 
+graphs.ipynb
 sp3.ipynb
 spoof_detector*.h5
-
+best_lightweight_model.keras
 audio_errors*.log
 discriminator_epoch*.log
 generator_epoch*.log
