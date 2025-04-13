@@ -14,6 +14,9 @@ datasetNEW/
 SceneFake/
 generator_comparison/
 img/
+uploads/
+static/
+Reactions/
 
 # Ignore common Python cache and dependencies
 __pycache__/
@@ -22,7 +25,9 @@ __pycache__/
 *.pyd
 env/
 venv/
-
+IMG2/
+img/
+new shit/
 graphs.ipynb
 sp3.ipynb
 spoof_detector*.h5

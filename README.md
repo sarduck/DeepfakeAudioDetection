@@ -1,3 +1,79 @@
+# Audio Deepfake Detector
+
+A Flask web application that uses a trained deep learning model to detect deepfake audio files.
+
+## Features
+
+- Upload audio files (WAV, MP3, OGG) through a modern web interface
+- Real-time processing and classification
+- Shows confidence score for predictions
+- Drag-and-drop file upload support
+- Mobile-responsive design
+
+## Prerequisites
+
+- Python 3.8 or higher
+- pip (Python package manager)
+
+## Installation
+
+1. Clone this repository:
+```bash
+git clone <repository-url>
+cd <repository-directory>
+```
+
+2. Create a virtual environment (recommended):
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows, use: venv\Scripts\activate
+```
+
+3. Install the required packages:
+```bash
+pip install -r requirements.txt
+```
+
+## Usage
+
+1. Make sure the model weights file (`clf_ep28-auc0.9800.weights.h5`) is in the root directory.
+
+2. Start the Flask application:
+```bash
+python app.py
+```
+
+3. Open your web browser and navigate to:
+```
+http://localhost:5000
+```
+
+4. Upload an audio file by either:
+   - Dragging and dropping a file onto the upload area
+   - Clicking the upload area and selecting a file
+
+5. Wait for the analysis to complete and view the results.
+
+## Model Details
+
+The model uses mel spectrogram features extracted from audio files to classify them as either real or deepfake. The model architecture consists of:
+
+- Input layer accepting mel spectrograms
+- Three convolutional layers with max pooling
+- Two dense layers
+- Sigmoid output layer for binary classification
+
+## Notes
+
+- The model works best with audio files that are at least 4 seconds long
+- Supported audio formats: WAV, MP3, OGG
+- Maximum file size: 16MB
+- Processing time may vary depending on the file size and system resources
+
+## License
+
+[Your chosen license]
+
 # Deepfake Audio Detection using WGAN-GP + Attention Pre-training
 
 ## Overview

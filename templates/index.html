@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Deepfake Detector</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .upload-area {
+            border: 2px dashed #cbd5e0;
+            transition: all 0.3s ease;
+        }
+        .upload-area:hover {
+            border-color: #4299e1;
+        }
+        .result-card {
+            transition: all 0.3s ease;
+        }
+        .result-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .visualization-section {
+            transition: all 0.3s ease;
+        }
+        .visualization-card {
+            transition: all 0.3s ease;
+        }
+        .visualization-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <div class="max-w-4xl mx-auto">
+            <h1 class="text-4xl font-bold text-center text-gray-800 mb-8">Audio Deepfake Detector</h1>
+            
+            <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+                <div class="upload-area rounded-lg p-8 text-center cursor-pointer" id="uploadArea">
+                    <input type="file" id="fileInput" class="hidden" accept=".wav,.mp3,.ogg">
+                    <div class="text-gray-600">
+                        <svg class="mx-auto h-12 w-12 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                        </svg>
+                        <p class="text-lg font-medium">Drag and drop your audio file here</p>
+                        <p class="text-sm mt-2">or</p>
+                        <button class="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                            Browse Files
+                        </button>
+                        <p class="text-xs mt-4 text-gray-500">Supported formats: WAV, MP3, OGG</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="resultCard" class="result-card bg-white rounded-lg shadow-lg p-6 mb-8 hidden">
+                <h2 class="text-2xl font-semibold text-center mb-4">Analysis Result</h2>
+                <div class="text-center">
+                    <p class="text-xl font-medium mb-2" id="resultText"></p>
+                    <p class="text-gray-600" id="confidenceText"></p>
+                </div>
+                
+                <!-- Audio Player -->
+                <div class="mt-6 border-t pt-6">
+                    <h3 class="text-lg font-semibold text-center mb-4">Listen to the Audio</h3>
+                    <div class="flex justify-center">
+                        <audio id="audioPlayer" controls class="w-full max-w-md">
+                            Your browser does not support the audio element.
+                        </audio>
+                    </div>
+                </div>
+                
+                <div class="mt-6 flex justify-center">
+                    <div id="gifContainer" class="w-full max-w-md rounded-lg overflow-hidden shadow-lg">
+                        <img id="resultGif" class="w-full h-auto" alt="Result GIF" />
+                    </div>
+                </div>
+            </div>
+            
+            <div id="visualizationSection" class="visualization-section hidden">
+                <h2 class="text-2xl font-semibold text-center mb-6">Audio Visualizations</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Mel Spectrogram -->
+                    <div class="visualization-card bg-white rounded-lg shadow-lg p-4">
+                        <h3 class="text-lg font-semibold mb-2">Mel Spectrogram</h3>
+                        <p class="text-sm text-gray-600 mb-2">Shows frequency content over time using the mel scale (perceptual scale of pitches).</p>
+                        <div id="melSpectrogramContainer" class="w-full">
+                            <img id="melSpectrogram" class="w-full rounded" alt="Mel Spectrogram" />
+                        </div>
+                    </div>
+                    
+                    <!-- Waveform -->
+                    <div class="visualization-card bg-white rounded-lg shadow-lg p-4">
+                        <h3 class="text-lg font-semibold mb-2">Waveform</h3>
+                        <p class="text-sm text-gray-600 mb-2">Visual representation of the sound's amplitude over time.</p>
+                        <div id="waveformContainer" class="w-full">
+                            <img id="waveform" class="w-full rounded" alt="Waveform" />
+                        </div>
+                    </div>
+                    
+                    <!-- Chromagram -->
+                    <div class="visualization-card bg-white rounded-lg shadow-lg p-4">
+                        <h3 class="text-lg font-semibold mb-2">Chromagram</h3>
+                        <p class="text-sm text-gray-600 mb-2">Shows the distribution of energy across the 12 pitch classes.</p>
+                        <div id="chromagramContainer" class="w-full">
+                            <img id="chromagram" class="w-full rounded" alt="Chromagram" />
+                        </div>
+                    </div>
+                    
+                    <!-- Spectral Contrast -->
+                    <div class="visualization-card bg-white rounded-lg shadow-lg p-4">
+                        <h3 class="text-lg font-semibold mb-2">Spectral Contrast</h3>
+                        <p class="text-sm text-gray-600 mb-2">Shows the difference between peaks and valleys in the spectrum.</p>
+                        <div id="spectralContrastContainer" class="w-full">
+                            <img id="spectralContrast" class="w-full rounded" alt="Spectral Contrast" />
+                        </div>
+                    </div>
+                    
+                    <!-- MFCC -->
+                    <div class="visualization-card bg-white rounded-lg shadow-lg p-4">
+                        <h3 class="text-lg font-semibold mb-2">MFCC</h3>
+                        <p class="text-sm text-gray-600 mb-2">Mel-frequency cepstral coefficients - compact representation of the spectrum.</p>
+                        <div id="mfccContainer" class="w-full">
+                            <img id="mfcc" class="w-full rounded" alt="MFCC" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="errorCard" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative hidden" role="alert">
+                <span class="block sm:inline" id="errorText"></span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const resultCard = document.getElementById('resultCard');
+        const errorCard = document.getElementById('errorCard');
+        const resultText = document.getElementById('resultText');
+        const confidenceText = document.getElementById('confidenceText');
+        const errorText = document.getElementById('errorText');
+        const visualizationSection = document.getElementById('visualizationSection');
+        const melSpectrogram = document.getElementById('melSpectrogram');
+        const waveform = document.getElementById('waveform');
+        const chromagram = document.getElementById('chromagram');
+        const spectralContrast = document.getElementById('spectralContrast');
+        const mfcc = document.getElementById('mfcc');
+
+        // Handle drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('border-blue-500');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('border-blue-500');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('border-blue-500');
+            const file = e.dataTransfer.files[0];
+            handleFile(file);
+        });
+
+        // Handle click to upload
+        uploadArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            handleFile(file);
+        });
+
+        function handleFile(file) {
+            if (!file) return;
+
+            // Validate file type
+            const validTypes = ['audio/wav', 'audio/wave', 'audio/x-wav', 'audio/mpeg', 'audio/ogg', 'audio/mp3'];
+            if (!validTypes.includes(file.type) && 
+                !file.name.toLowerCase().endsWith('.wav') && 
+                !file.name.toLowerCase().endsWith('.mp3') && 
+                !file.name.toLowerCase().endsWith('.ogg')) {
+                showError('Please upload a valid audio file (WAV, MP3, or OGG)');
+                return;
+            }
+
+            // Show loading state
+            uploadArea.innerHTML = `
+                <div class="text-gray-600">
+                    <svg class="animate-spin mx-auto h-12 w-12 mb-4" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <p class="text-lg font-medium">Processing audio file...</p>
+                </div>
+            `;
+
+            // Hide previous results
+            resultCard.classList.add('hidden');
+            visualizationSection.classList.add('hidden');
+            errorCard.classList.add('hidden');
+
+            // Upload file
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/predict', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    showError(data.error);
+                    resetUploadArea();
+                } else {
+                    showResult(data);
+                    showVisualizations(data.visualizations);
+                    resetUploadArea();
+                }
+            })
+            .catch(error => {
+                showError('An error occurred while processing the file');
+                resetUploadArea();
+            });
+        }
+
+        function showResult(data) {
+            resultCard.classList.remove('hidden');
+            errorCard.classList.add('hidden');
+            
+            resultText.textContent = `This audio is ${data.result}`;
+            confidenceText.textContent = `Confidence: ${(data.confidence * 100).toFixed(2)}%`;
+            
+            // Remove previous colors
+            resultText.classList.remove('text-green-600', 'text-red-600');
+            
+            // Add color based on result
+            if (data.result === 'Real') {
+                resultText.classList.add('text-green-600');
+                // Show GIF based on the result from backend
+                if (data.reaction_gif) {
+                    document.getElementById('resultGif').src = data.reaction_gif;
+                    document.getElementById('gifContainer').classList.remove('hidden');
+                } else {
+                    // Fallback to default GIF if none provided
+                    document.getElementById('resultGif').src = 'https://media.giphy.com/media/3oKIPsx2VAYAgEHC12/giphy.gif';
+                    document.getElementById('gifContainer').classList.remove('hidden');
+                }
+            } else {
+                resultText.classList.add('text-red-600');
+                // Show GIF based on the result from backend
+                if (data.reaction_gif) {
+                    document.getElementById('resultGif').src = data.reaction_gif;
+                    document.getElementById('gifContainer').classList.remove('hidden');
+                } else {
+                    // Fallback to default GIF if none provided
+                    document.getElementById('resultGif').src = 'https://media.giphy.com/media/l2JJKs3I69qfaQleE/giphy.gif';
+                    document.getElementById('gifContainer').classList.remove('hidden');
+                }
+            }
+            
+            // Set audio source if available
+            if (data.audio_file) {
+                const audioPlayer = document.getElementById('audioPlayer');
+                audioPlayer.src = data.audio_file;
+                audioPlayer.parentElement.parentElement.classList.remove('hidden');
+            } else {
+                document.getElementById('audioPlayer').parentElement.parentElement.classList.add('hidden');
+            }
+        }
+        
+        function showVisualizations(visualizations) {
+            if (!visualizations) {
+                visualizationSection.classList.add('hidden');
+                return;
+            }
+            
+            visualizationSection.classList.remove('hidden');
+            
+            // Set image sources
+            if (visualizations.mel_spectrogram) {
+                melSpectrogram.src = `/${visualizations.mel_spectrogram}`;
+                melSpectrogram.parentElement.classList.remove('hidden');
+            } else {
+                melSpectrogram.parentElement.classList.add('hidden');
+            }
+            
+            if (visualizations.waveform) {
+                waveform.src = `/${visualizations.waveform}`;
+                waveform.parentElement.classList.remove('hidden');
+            } else {
+                waveform.parentElement.classList.add('hidden');
+            }
+            
+            if (visualizations.chromagram) {
+                chromagram.src = `/${visualizations.chromagram}`;
+                chromagram.parentElement.classList.remove('hidden');
+            } else {
+                chromagram.parentElement.classList.add('hidden');
+            }
+            
+            if (visualizations.spectral_contrast) {
+                spectralContrast.src = `/${visualizations.spectral_contrast}`;
+                spectralContrast.parentElement.classList.remove('hidden');
+            } else {
+                spectralContrast.parentElement.classList.add('hidden');
+            }
+            
+            if (visualizations.mfcc) {
+                mfcc.src = `/${visualizations.mfcc}`;
+                mfcc.parentElement.classList.remove('hidden');
+            } else {
+                mfcc.parentElement.classList.add('hidden');
+            }
+        }
+
+        function showError(message) {
+            errorCard.classList.remove('hidden');
+            resultCard.classList.add('hidden');
+            visualizationSection.classList.add('hidden');
+            errorText.textContent = message;
+        }
+
+        function resetUploadArea() {
+            uploadArea.innerHTML = `
+                <div class="text-gray-600">
+                    <svg class="mx-auto h-12 w-12 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                    </svg>
+                    <p class="text-lg font-medium">Drag and drop your audio file here</p>
+                    <p class="text-sm mt-2">or</p>
+                    <button class="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                        Browse Files
+                    </button>
+                    <p class="text-xs mt-4 text-gray-500">Supported formats: WAV, MP3, OGG</p>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html> 
