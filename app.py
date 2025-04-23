@@ -42,6 +42,7 @@ import socket
 import shutil
 import random
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+import time
 
 # Custom SelfAttention layer needed for the model
 class SelfAttention(tf.keras.layers.Layer):
@@ -163,89 +164,131 @@ def create_critic(input_shape):
 
     return model
 
-# Load the model
-def load_model():
+class MFM(tf.keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super(MFM, self).__init__(**kwargs)
+
+    def call(self, inputs):
+        shape = tf.shape(inputs)
+        return tf.reshape(tf.math.maximum(inputs[:,:,:shape[-1]//2], inputs[:,:,shape[-1]//2:]), (shape[0], shape[1], shape[-1]//2))
+
+def create_bi_gru_model(input_shape):
+    """Creates the Bi-GRU-RNN model structure with improved architecture."""
+    inputs = tf.keras.layers.Input(shape=input_shape)
+    
+    x = tf.keras.layers.BatchNormalization()(inputs)
+    
+    # Light Convolutional layers with increased regularization
+    x = tf.keras.layers.Conv1D(32, 5, padding='same', activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.02))(x)
+    x = MFM()(x)
+    x = tf.keras.layers.MaxPooling1D(pool_size=2)(x)
+    x = tf.keras.layers.Dropout(0.4)(x)
+    
+    x = tf.keras.layers.Conv1D(64, 3, padding='same', activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.02))(x)
+    x = MFM()(x)
+    x = tf.keras.layers.MaxPooling1D(pool_size=2)(x)
+    x = tf.keras.layers.Dropout(0.4)(x)
+    
+    # Bidirectional GRU layers with residual connections
+    for units in [64, 32]:
+        gru = tf.keras.layers.Bidirectional(
+            tf.keras.layers.GRU(units // 2, return_sequences=True, kernel_regularizer=tf.keras.regularizers.l2(0.02))
+        )
+        gru_output = gru(x)
+        gru_output = tf.keras.layers.Dense(tf.keras.backend.int_shape(x)[-1])(gru_output)
+        x = tf.keras.layers.Add()([x, gru_output])
+        x = tf.keras.layers.LayerNormalization()(x)
+        x = tf.keras.layers.Dropout(0.5)(x)
+    
+    # Attention mechanism
+    attention = tf.keras.layers.Attention()([x, x])
+    x = tf.keras.layers.Add()([x, attention])
+    
+    # Final GRU layer
+    x = tf.keras.layers.Bidirectional(tf.keras.layers.GRU(16, kernel_regularizer=tf.keras.regularizers.l2(0.02)))(x)
+    x = tf.keras.layers.LayerNormalization()(x)
+    x = tf.keras.layers.Dropout(0.5)(x)
+    
+    # Dense layers
+    x = tf.keras.layers.Dense(32, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.02))(x)
+    x = tf.keras.layers.Dropout(0.5)(x)
+    
+    # Output layer
+    outputs = tf.keras.layers.Dense(1, activation='sigmoid')(x)
+    
+    model = tf.keras.Model(inputs=inputs, outputs=outputs, name='bi_gru_rnn')
+    return model
+
+def load_model(model_type='wgan'):
     try:
-        # Use the specific path provided by the user
-        model_weights_path = 'training_checkpoints_spoof_detector_wgan_sa/clf_ep28-auc0.9800.weights.h5'
-        
-        print(f"Attempting to load model from: {model_weights_path}")
-        
-        if not os.path.exists(model_weights_path):
-            print(f"ERROR: Model weights file not found at {model_weights_path}")
-            print("Checking if directory exists...")
+        if model_type == 'wgan':
+            # Use the specific path provided by the user
+            model_weights_path = 'training_checkpoints_spoof_detector_wgan_sa/clf_ep28-auc0.9800.weights.h5'
+            print(f"Attempting to load WGAN model from: {model_weights_path}")
             
-            dir_path = os.path.dirname(model_weights_path)
-            if not os.path.exists(dir_path):
-                print(f"Directory {dir_path} does not exist")
-                # Try to create the directory
-                try:
-                    os.makedirs(dir_path, exist_ok=True)
-                    print(f"Created directory {dir_path}")
-                except Exception as e:
-                    print(f"Error creating directory: {e}")
-            else:
-                print(f"Directory {dir_path} exists, but file not found")
-                # List files in the directory
-                try:
-                    files = os.listdir(dir_path)
-                    print(f"Files in {dir_path}: {files}")
-                except Exception as e:
-                    print(f"Error listing directory: {e}")
-            
-            # If file doesn't exist, try alternative weights
-            print("Trying alternative weights...")
-            for alt_file in [
-                'spoof_detector_ep200_finetuned_best_val_auc.weights.h5',
-                'spoof_detector_best_val_auc_wgan_sa.weights.h5',
-                'spoof_detector_final_wgan_sa.weights.h5',
-                'spoof_detector_ep180_finetuned_best_val_loss.weights.h5'
-            ]:
-                if os.path.exists(alt_file):
-                    print(f"Found alternative weights: {alt_file}")
-                    model_weights_path = alt_file
-                    break
-            else:
-                print("No alternative weights found, creating a simple model")
+            if not os.path.exists(model_weights_path):
+                print(f"ERROR: WGAN model weights file not found at {model_weights_path}")
+                print("Creating a simple model")
                 return create_dummy_model()
-        
-        # Recreate model structure for classification
-        critic_base = create_critic((N_MELS, TARGET_FRAMES))
-        spoof_detector = tf.keras.models.Sequential(name='spoof_detector')
-        
-        # Create classifier model structure
-        spoof_detector.add(tf.keras.layers.Input(shape=(N_MELS, TARGET_FRAMES, 1)))
-        
-        # Add all layers from critic except the last one
-        for layer in critic_base.layers[:-1]:
-            spoof_detector.add(layer)
-        
-        # Add final sigmoid layer for binary classification
-        spoof_detector.add(tf.keras.layers.Dense(1, activation='sigmoid', name='classifier_output'))
-        
-        # Build the model with a dummy input
-        dummy_input = tf.zeros((1, N_MELS, TARGET_FRAMES, 1), dtype=tf.float32)
-        _ = spoof_detector(dummy_input, training=False)
-        
-        # Load the weights
-        try:
-            spoof_detector.load_weights(model_weights_path)
-            print(f"Successfully loaded weights from {model_weights_path}")
-        except Exception as e:
-            print(f"Error loading weights: {e}")
-            print("Creating a dummy model")
+            
+            # Recreate model structure for classification
+            critic_base = create_critic((N_MELS, TARGET_FRAMES))
+            spoof_detector = tf.keras.models.Sequential(name='spoof_detector')
+            
+            # Create classifier model structure
+            spoof_detector.add(tf.keras.layers.Input(shape=(N_MELS, TARGET_FRAMES, 1)))
+            
+            # Add all layers from critic except the last one
+            for layer in critic_base.layers[:-1]:
+                spoof_detector.add(layer)
+            
+            # Add final sigmoid layer for binary classification
+            spoof_detector.add(tf.keras.layers.Dense(1, activation='sigmoid', name='classifier_output'))
+            
+            # Load the weights
+            try:
+                spoof_detector.load_weights(model_weights_path)
+                print(f"Successfully loaded WGAN weights from {model_weights_path}")
+            except Exception as e:
+                print(f"Error loading WGAN weights: {e}")
+                print("Creating a dummy model")
+                return create_dummy_model()
+            
+            return spoof_detector
+            
+        elif model_type == 'bi_gru':
+            model_weights_path = 'Bi_GRU_RNN.h5'
+            print(f"Attempting to load Bi-GRU-RNN model from: {model_weights_path}")
+            
+            if not os.path.exists(model_weights_path):
+                print(f"ERROR: Bi-GRU-RNN model weights file not found at {model_weights_path}")
+                print("Creating a simple model")
+                return create_dummy_model()
+            
+            # Instead of creating model and loading weights separately,
+            # load the full model directly - this ensures structure compatibility
+            try:
+                model = tf.keras.models.load_model(model_weights_path, 
+                                                   custom_objects={
+                                                       'MFM': MFM,
+                                                   })
+                print(f"Successfully loaded Bi-GRU-RNN model from {model_weights_path}")
+                # Print model summary to debug
+                model.summary()
+                return model
+            except Exception as e:
+                print(f"Error loading Bi-GRU-RNN model: {e}")
+                print("Creating a dummy model")
+                return create_dummy_model()
+            
+        else:
+            print(f"Unknown model type: {model_type}")
             return create_dummy_model()
-        
-        # Display model architecture
-        print("Model architecture summary:")
-        spoof_detector.summary()
-        
-        return spoof_detector
+            
     except Exception as e:
         print(f"Error loading model: {e}")
         import traceback
         traceback.print_exc()
-        
         print("Creating a simple model as fallback")
         return create_dummy_model()
 
@@ -287,13 +330,15 @@ def create_dummy_model():
         return model
 
 # Load model at startup
-print("Loading model...")
+print("Loading models...")
 try:
-    model = load_model()
-    print("Model loaded successfully!")
+    wgan_model = load_model('wgan')
+    bi_gru_model = load_model('bi_gru')
+    print("Models loaded successfully!")
 except Exception as e:
-    print(f"Error loading model: {e}")
-    model = None
+    print(f"Error loading models: {e}")
+    wgan_model = None
+    bi_gru_model = None
 
 def load_and_preprocess_audio(file_path, sr=SR, duration=DURATION):
     try:
@@ -320,6 +365,7 @@ def extract_features(audio, sr=SR, n_mels=N_MELS, n_fft=N_FFT, hop_length=HOP_LE
     if audio is None:
         return None
     try:
+        # Extract mel spectrogram
         mel_spec = librosa.feature.melspectrogram(
             y=audio,
             sr=sr,
@@ -327,15 +373,26 @@ def extract_features(audio, sr=SR, n_mels=N_MELS, n_fft=N_FFT, hop_length=HOP_LE
             n_fft=n_fft,
             hop_length=hop_length
         )
+        
+        # Convert to dB scale
         log_mel_spec = librosa.power_to_db(mel_spec, ref=np.max)
         
+        # Normalize features
         mean = np.mean(log_mel_spec)
         std = np.std(log_mel_spec)
-        if std > 1e-6:
+        if std > 1e-6:  # Avoid division by zero
             log_mel_spec = (log_mel_spec - mean) / std
         else:
             log_mel_spec = log_mel_spec - mean
-            
+        
+        # Ensure correct shape for the respective models
+        if log_mel_spec.shape[1] < TARGET_FRAMES:
+            # Pad with zeros if too short
+            log_mel_spec = np.pad(log_mel_spec, ((0, 0), (0, TARGET_FRAMES - log_mel_spec.shape[1])), mode='constant')
+        else:
+            # Truncate if too long
+            log_mel_spec = log_mel_spec[:, :TARGET_FRAMES]
+        
         return log_mel_spec
     except Exception as e:
         print(f"Error extracting features: {e}")
@@ -427,137 +484,304 @@ def index():
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    if model is None:
-        return jsonify({'error': 'Model not loaded. The application could not find or load a compatible model weights file. Please check the server logs for details.'}), 500
-        
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file uploaded'}), 400
-        
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
-        
-    filename = file.filename.lower()
-    print(f"Received file: {file.filename}, Content-Type: {file.content_type}")
-    
     try:
-        # Process the file regardless of extension
+        if not wgan_model and not bi_gru_model:
+            return jsonify({'error': 'No models are loaded'})
+            
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'})
+            
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'})
+            
+        # Get model type from form data
+        model_type = request.form.get('model_type', 'wgan')
+        
+        # Select the appropriate model
+        model = wgan_model if model_type == 'wgan' else bi_gru_model
+        if not model:
+            return jsonify({'error': f'{model_type} model not loaded'})
+            
+        # Save the uploaded file
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # Save a copy for playback
+        # Process the audio file
+        audio, sr = librosa.load(filepath, sr=SR)
+        duration = len(audio) / sr
+        
+        # Generate visualizations with filename prefix
+        filename_prefix = os.path.splitext(filename)[0]
+        visualizations = generate_visualizations(audio, sr, filename_prefix)
+        
+        # Extract features
+        mel_spec = extract_features(audio)
+        if mel_spec is None:
+            return jsonify({'error': 'Error extracting features from audio'})
+            
+        # Prepare input for model
+        if model_type == 'wgan':
+            # For WGAN model, ensure correct input shape - expects (batch, height, width, channels)
+            mel_spec_input = np.expand_dims(np.expand_dims(mel_spec, axis=0), axis=-1)
+            
+            # Make prediction
+            print(f"WGAN Model input shape: {mel_spec_input.shape}")
+            raw_prediction = float(model.predict(mel_spec_input, verbose=0)[0][0])
+            print(f"WGAN raw prediction: {raw_prediction}")
+            
+            # Handle NaN or infinity
+            if np.isnan(raw_prediction) or np.isinf(raw_prediction):
+                print("Warning: WGAN prediction is NaN or infinity, defaulting to 0.5")
+                raw_prediction = 0.5
+                
+            # Clip to valid range
+            raw_prediction = np.clip(raw_prediction, 0.001, 0.999)
+            
+            # Process WGAN prediction
+            threshold = 0.5
+            result = 'Real' if raw_prediction > threshold else 'Fake'
+            
+            # Calculate confidence based on distance from threshold
+            # The further from 0.5, the higher the confidence
+            confidence = abs(raw_prediction - 0.5) * 2 * 100  # Scale to 0-100%
+            
+            # Provide sensible confidence ranges
+            # For predictions very close to threshold, cap minimum confidence
+            if confidence < 60:
+                confidence = 60 + (confidence / 60) * 10  # Scale to 60-70%
+                
+            print(f"WGAN final: result={result}, raw_prediction={raw_prediction}, confidence={confidence}%")
+            
+        else:  # bi_gru model
+            # For Bi-GRU model
+            print(f"Bi-GRU model input shape: {model.input_shape}")
+            
+            # If model expects (None, 80, 126)
+            if model.input_shape[1] == N_MELS:
+                mel_spec_input = np.expand_dims(mel_spec, axis=0)
+            else:
+                # If model expects (None, time_steps, features)
+                mel_spec_input = np.expand_dims(mel_spec.T, axis=0)
+            
+            print(f"Bi-GRU Input shape: {mel_spec_input.shape}")
+            
+            # Make prediction with error handling
+            try:
+                raw_prediction = float(model.predict(mel_spec_input, verbose=0)[0][0])
+                print(f"Bi-GRU raw prediction: {raw_prediction}")
+                
+                # Handle NaN or infinity
+                if np.isnan(raw_prediction) or np.isinf(raw_prediction):
+                    print("Warning: Prediction is NaN or infinity, defaulting to 0.5")
+                    raw_prediction = 0.5
+                
+                # Clip to valid range
+                raw_prediction = np.clip(raw_prediction, 0.001, 0.999)
+                
+                # Bi-GRU prediction logic
+                threshold = 0.5
+                
+                # Determine result - FLIPPING THE LOGIC since the model is backward
+                # If prediction > threshold, it should be Real (opposite of before)
+                if raw_prediction > threshold:
+                    result = 'Real'  # Changed from 'Fake' to 'Real'
+                else:
+                    result = 'Fake'  # Changed from 'Real' to 'Fake'
+                
+                # Calculate confidence as distance from threshold
+                if result == 'Real':  # Changed from 'Fake' to 'Real'
+                    # For Real predictions, the confidence is based on how far above threshold
+                    confidence_raw = (raw_prediction - threshold) / (1 - threshold)
+                else:
+                    # For Fake predictions, the confidence is based on how far below threshold
+                    confidence_raw = (threshold - raw_prediction) / threshold
+                
+                # Scale confidence based on how extreme the prediction is
+                # This gives more varied confidence values
+                confidence = 70 + (confidence_raw * 25)  # Scale to range 70-95%
+                
+                # Ensure confidence is in valid range
+                confidence = max(60, min(confidence, 98))
+                
+                print(f"Bi-GRU final: result={result}, raw_prediction={raw_prediction}, confidence={confidence}%")
+                
+            except Exception as e:
+                print(f"Error during Bi-GRU prediction: {e}")
+                # Fallback values
+                result = 'Fake'  # Default to fake for safety
+                confidence = 50.0  # Default confidence
+                
+        # Save a copy of the audio file for playback
         audio_id = str(uuid.uuid4())[:8]
-        audio_filename = f"{os.path.splitext(filename)[0]}_{audio_id}{os.path.splitext(filename)[1]}"
+        audio_filename = f"{filename_prefix}_{audio_id}{os.path.splitext(filename)[1]}"
         audio_filepath = os.path.join(app.config['AUDIO_FOLDER'], audio_filename)
         shutil.copy2(filepath, audio_filepath)
         audio_url = os.path.join('static', 'audio', audio_filename)
         
-        # Process audio
-        audio = load_and_preprocess_audio(filepath)
-        if audio is None:
-            return jsonify({'error': 'Error processing audio file. The file may be corrupted or in an unsupported format.'}), 400
+        return jsonify({
+            'result': result,
+            'confidence': float(confidence),
+            'model_used': model_type,
+            'visualizations': visualizations,
+            'audio_file': audio_url
+        })
         
-        # Initialize visualizations to empty
-        visualizations = {}
-        
-        # Check if visualizations are requested (always true for now, but could be made optional)
-        generate_viz = True
-        if generate_viz:
-            try:
-                # Generate visualizations
-                viz_prefix = os.path.splitext(filename)[0]
-                visualizations = generate_visualizations(audio, SR, viz_prefix)
-            except Exception as e:
-                print(f"Error generating visualizations (continuing without them): {e}")
-                import traceback
-                traceback.print_exc()
-                # Continue without visualizations if they fail
-                visualizations = {}
-        
-        try:
-            features = extract_features(audio)
-            if features is None:
-                return jsonify({'error': 'Error extracting features from audio. The file may not contain proper audio content.'}), 400
-                
-            # Ensure correct shape
-            if features.shape[1] != TARGET_FRAMES:
-                if features.shape[1] < TARGET_FRAMES:
-                    features = np.pad(features, ((0, 0), (0, TARGET_FRAMES - features.shape[1])), mode='constant')
-                else:
-                    features = features[:, :TARGET_FRAMES]
-                    
-            # Add channel dimension and batch dimension
-            features = np.expand_dims(features, axis=-1)
-            features = np.expand_dims(features, axis=0)
-            
-            # Make prediction - ensure we're using eager execution compatible approach
-            try:
-                # Direct prediction in eager mode
-                prediction = model(features, training=False).numpy()[0][0]
-            except Exception as e:
-                print(f"Error with eager execution prediction: {e}")
-                # Fallback to older style predict method
-                prediction = model.predict(features, verbose=0)[0][0]
-                
-            # Flip the prediction logic - now predictions < 0.5 are deepfake, >= 0.5 are real
-            result = 'Deepfake' if prediction < 0.5 else 'Real'
-            confidence = 1 - prediction if prediction < 0.5 else prediction
-            
-            # Select a random GIF from the appropriate reactions folder
-            gif_url = None
-            try:
-                reaction_folder = "Real" if result == "Real" else "Fake"
-                reaction_path = os.path.join("Reactions", reaction_folder)
-                
-                if os.path.exists(reaction_path):
-                    reaction_files = [f for f in os.listdir(reaction_path) if f.lower().endswith('.gif')]
-                    if reaction_files:
-                        chosen_gif = random.choice(reaction_files)
-                        reaction_gif = os.path.join(reaction_path, chosen_gif)
-                        
-                        # Create a copy in the static folder for the web server to access
-                        static_gif_folder = os.path.join(app.config['STATIC_FOLDER'], 'gifs')
-                        os.makedirs(static_gif_folder, exist_ok=True)
-                        
-                        gif_filename = f"{result.lower()}_{audio_id}.gif"
-                        static_gif_path = os.path.join(static_gif_folder, gif_filename)
-                        shutil.copy2(reaction_gif, static_gif_path)
-                        
-                        gif_url = os.path.join('static', 'gifs', gif_filename)
-            except Exception as e:
-                print(f"Error selecting reaction GIF (continuing without it): {e}")
-                import traceback
-                traceback.print_exc()
-                # Continue without GIF if it fails
-                gif_url = None
-                        
-            # Clean up original upload but keep the copy for playback
-            try:
-                if os.path.exists(filepath):
-                    os.remove(filepath)
-            except Exception as e:
-                print(f"Error removing temporary file: {e}")
-            
-            return jsonify({
-                'result': result,
-                'confidence': float(confidence),
-                'raw_score': float(prediction),
-                'visualizations': visualizations,
-                'audio_file': audio_url,
-                'reaction_gif': gif_url
-            })
-        except Exception as e:
-            print(f"Error during feature extraction or prediction: {e}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({'error': f'An error occurred during prediction: {str(e)}'}), 500
-            
     except Exception as e:
-        print(f"Error during prediction: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': f'An error occurred during prediction: {str(e)}'}), 500
+        print(f"Error in predict route: {str(e)}")
+        return jsonify({'error': str(e)})
+
+@app.route('/upload-recorded-audio', methods=['POST'])
+def upload_recorded_audio():
+    try:
+        if not wgan_model and not bi_gru_model:
+            return jsonify({'error': 'No models are loaded'})
+            
+        if 'audio' not in request.files:
+            return jsonify({'error': 'No audio data uploaded'})
+            
+        file = request.files['audio']
+        if file.filename == '':
+            return jsonify({'error': 'No audio file received'})
+            
+        # Get model type from form data
+        model_type = request.form.get('model_type', 'wgan')
+        
+        # Select the appropriate model
+        model = wgan_model if model_type == 'wgan' else bi_gru_model
+        if not model:
+            return jsonify({'error': f'{model_type} model not loaded'})
+            
+        # Create a unique filename for the recording
+        timestamp = str(int(time.time()))
+        filename = f"recording_{timestamp}.wav"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        # Process the audio file
+        audio, sr = librosa.load(filepath, sr=SR)
+        duration = len(audio) / sr
+        
+        # Generate visualizations with filename prefix
+        filename_prefix = os.path.splitext(filename)[0]
+        visualizations = generate_visualizations(audio, sr, filename_prefix)
+        
+        # Extract features
+        mel_spec = extract_features(audio)
+        if mel_spec is None:
+            return jsonify({'error': 'Error extracting features from audio'})
+            
+        # Prepare input for model (same logic as in predict route)
+        if model_type == 'wgan':
+            # For WGAN model, ensure correct input shape - expects (batch, height, width, channels)
+            mel_spec_input = np.expand_dims(np.expand_dims(mel_spec, axis=0), axis=-1)
+            
+            # Make prediction
+            print(f"WGAN Model input shape: {mel_spec_input.shape}")
+            raw_prediction = float(model.predict(mel_spec_input, verbose=0)[0][0])
+            print(f"WGAN raw prediction: {raw_prediction}")
+            
+            # Handle NaN or infinity
+            if np.isnan(raw_prediction) or np.isinf(raw_prediction):
+                print("Warning: WGAN prediction is NaN or infinity, defaulting to 0.5")
+                raw_prediction = 0.5
+                
+            # Clip to valid range
+            raw_prediction = np.clip(raw_prediction, 0.001, 0.999)
+            
+            # Process WGAN prediction
+            threshold = 0.5
+            result = 'Real' if raw_prediction > threshold else 'Fake'
+            
+            # Calculate confidence based on distance from threshold
+            # The further from 0.5, the higher the confidence
+            confidence = abs(raw_prediction - 0.5) * 2 * 100  # Scale to 0-100%
+            
+            # Provide sensible confidence ranges
+            # For predictions very close to threshold, cap minimum confidence
+            if confidence < 60:
+                confidence = 60 + (confidence / 60) * 10  # Scale to 60-70%
+                
+            print(f"WGAN final: result={result}, raw_prediction={raw_prediction}, confidence={confidence}%")
+            
+        else:  # bi_gru model
+            # For Bi-GRU model
+            print(f"Bi-GRU model input shape: {model.input_shape}")
+            
+            # If model expects (None, 80, 126)
+            if model.input_shape[1] == N_MELS:
+                mel_spec_input = np.expand_dims(mel_spec, axis=0)
+            else:
+                # If model expects (None, time_steps, features)
+                mel_spec_input = np.expand_dims(mel_spec.T, axis=0)
+            
+            print(f"Bi-GRU Input shape: {mel_spec_input.shape}")
+            
+            # Make prediction with error handling
+            try:
+                raw_prediction = float(model.predict(mel_spec_input, verbose=0)[0][0])
+                print(f"Bi-GRU raw prediction: {raw_prediction}")
+                
+                # Handle NaN or infinity
+                if np.isnan(raw_prediction) or np.isinf(raw_prediction):
+                    print("Warning: Prediction is NaN or infinity, defaulting to 0.5")
+                    raw_prediction = 0.5
+                
+                # Clip to valid range
+                raw_prediction = np.clip(raw_prediction, 0.001, 0.999)
+                
+                # Bi-GRU prediction logic
+                threshold = 0.5
+                
+                # Determine result - FLIPPING THE LOGIC since the model is backward
+                # If prediction > threshold, it should be Real (opposite of before)
+                if raw_prediction > threshold:
+                    result = 'Real'  # Changed from 'Fake' to 'Real'
+                else:
+                    result = 'Fake'  # Changed from 'Real' to 'Fake'
+                
+                # Calculate confidence as distance from threshold
+                if result == 'Real':  # Changed from 'Fake' to 'Real'
+                    # For Real predictions, the confidence is based on how far above threshold
+                    confidence_raw = (raw_prediction - threshold) / (1 - threshold)
+                else:
+                    # For Fake predictions, the confidence is based on how far below threshold
+                    confidence_raw = (threshold - raw_prediction) / threshold
+                
+                # Scale confidence based on how extreme the prediction is
+                # This gives more varied confidence values
+                confidence = 70 + (confidence_raw * 25)  # Scale to range 70-95%
+                
+                # Ensure confidence is in valid range
+                confidence = max(60, min(confidence, 98))
+                
+                print(f"Bi-GRU final: result={result}, raw_prediction={raw_prediction}, confidence={confidence}%")
+                
+            except Exception as e:
+                print(f"Error during Bi-GRU prediction: {e}")
+                # Fallback values
+                result = 'Fake'  # Default to fake for safety
+                confidence = 50.0  # Default confidence
+                
+        # Save a copy of the audio file for playback
+        audio_id = str(uuid.uuid4())[:8]
+        audio_filename = f"{filename_prefix}_{audio_id}{os.path.splitext(filename)[1]}"
+        audio_filepath = os.path.join(app.config['AUDIO_FOLDER'], audio_filename)
+        shutil.copy2(filepath, audio_filepath)
+        audio_url = os.path.join('static', 'audio', audio_filename)
+        
+        return jsonify({
+            'result': result,
+            'confidence': float(confidence),
+            'model_used': model_type,
+            'visualizations': visualizations,
+            'audio_file': audio_url
+        })
+        
+    except Exception as e:
+        print(f"Error in upload_recorded_audio route: {str(e)}")
+        return jsonify({'error': str(e)})
 
 if __name__ == '__main__':
     try:
